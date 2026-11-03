@@ -1,0 +1,4 @@
+# simulator output (compiled classes, bot error logs)
+tools/arena/build/
+# local Claude Code settings
+.claude/settings.local.json
