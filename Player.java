@@ -14,6 +14,8 @@ import java.math.*;
  * stacks that can be surrounded, greedily send free units to the most profitable captures, vacate used
  * triangles so they can be recaptured, keep units out of surround traps, and spend triangles on SPAWN:
  * the bigger army wins. ATTACK needs league 2 (Wood 1) or above.
+ * Idle units push towards the center and the opponent side; once the opening is over and the army is big
+ * enough, a third of it goes back to capture the triangles left near our start.
  **/
 class Player {
 
@@ -35,6 +37,14 @@ class Player {
     static final double OPP_TRIANGLE_VALUE = 2;
     // an attack costs a triangle and 3 units: only worth it against big stacks
     static final int ATTACK_MIN_KILLS = 4;
+    // map zones: a triangle is central when its corners are about as far from both starts (in moves)
+    static final double CENTER_WIDTH = 2;
+    // the opening ends once we own this share of the central triangles, or after this turn
+    static final double CENTER_SHARE = 0.5;
+    static final int INVASION_MAX_TURN = 40;
+    // after the opening, this share of the army takes the triangles left near our start, once big enough
+    static final double REAR_SHARE = 1.0 / 3;
+    static final int MIN_SPLIT_ARMY = 20;
 
     static int houseCount;
     static int[] my, opp;
@@ -42,7 +52,12 @@ class Player {
     static int[][] dist;
     static int[][] byDistance;  // byDistance[h] = all houses sorted by distance from h
     static List<Triangle> triangles = new ArrayList<>();
+    static int turn;
     static int turnsLeft;
+    static int[] startMine, startTheirs; // houses holding units on the first turn
+    static int[] front;                  // moves from our start minus moves from the opponent start
+    static boolean invasionDone;
+    static int[] rearLeft;               // free units of the rear group, null while the army is not split
 
     // per-turn plan
     static int[] free;              // units not assigned to any task yet
@@ -116,7 +131,7 @@ class Player {
         sourceMask = new int[houseCount];
         sourceStamp = new int[houseCount];
 
-        int turn = 0;
+        turn = 0;
         // game loop
         while (true) {
             turn++;
@@ -126,6 +141,10 @@ class Player {
                 int houseId = in.nextInt();
                 my[houseId] = in.nextInt();
                 opp[houseId] = in.nextInt();
+            }
+            if (turn == 1) {
+                startMine = housesWithUnits(my);
+                startTheirs = housesWithUnits(opp);
             }
             List<List<Integer>> adjacency = new ArrayList<>();
             for (int i = 0; i < houseCount; i++) adjacency.add(new ArrayList<>());
@@ -181,6 +200,8 @@ class Player {
         attacks = new ArrayList<>();
         spawns = new ArrayList<>();
         usedTriangles = new HashSet<>();
+        rearLeft = null;
+        computeZones();
 
         attackStacks();
         free = my.clone();
@@ -415,32 +436,73 @@ class Player {
         return pulls;
     }
 
-    // 3. greedily assign free units to the most profitable capturable triangles
+    /**
+     * 3. greedily assign free units to the most profitable capturable triangles.
+     * Once the center is taken and the army is big enough, the third of the army closest to our start captures
+     * the triangles left behind near our start while the rest keeps fighting in the center and beyond.
+     */
     static void captureTriangles() {
-        List<Triangle> targets = new ArrayList<>();
+        List<Triangle> rearTargets = new ArrayList<>();
+        List<Triangle> otherTargets = new ArrayList<>();
         for (Triangle t : triangles) {
             if (!t.capturable()) continue;
             boolean trap = false;
             for (int c : t.corners) trap |= surroundedBy(c, opp, my);
-            if (!trap) targets.add(t);
+            if (trap) continue;
+            if (isRear(t)) rearTargets.add(t);
+            else otherTargets.add(t);
         }
+        if (invasionDone && !rearTargets.isEmpty() && total(my) >= MIN_SPLIT_ARMY) {
+            rearLeft = rearGroup();
+            int[] frontGroup = new int[houseCount];
+            for (int h = 0; h < houseCount; h++) frontGroup[h] = free[h] - rearLeft[h];
+            planCaptures(rearTargets, rearLeft);
+            planCaptures(otherTargets, frontGroup);
+        } else {
+            rearTargets.addAll(otherTargets);
+            otherTargets.clear();
+            planCaptures(rearTargets, free.clone());
+        }
+        remainingTargets = rearTargets;
+        remainingTargets.addAll(otherTargets);
+    }
+
+    // plans captures of the given targets with the given units, removes the planned targets from the list
+    static void planCaptures(List<Triangle> targets, int[] supply) {
         while (!targets.isEmpty()) {
             Plan best = null;
             for (Triangle t : targets) {
-                Plan plan = evaluate(t);
+                Plan plan = evaluate(t, supply);
                 if (plan != null && (best == null || plan.score > best.score)) best = plan;
             }
             if (best == null) break;
-            for (int[] pull : best.pulls) assign(pull[0], pull[1], pull[2], best.eta <= 1);
+            for (int[] pull : best.pulls) {
+                assign(pull[0], pull[1], pull[2], best.eta <= 1);
+                supply[pull[0]] -= pull[2];
+            }
             targets.remove(best.triangle);
         }
-        remainingTargets = targets;
     }
 
-    static Plan evaluate(Triangle t) {
+    // the units deepest on our side, a third of the army
+    static int[] rearGroup() {
+        int quota = (int) Math.round(total(my) * REAR_SHARE);
+        Integer[] order = new Integer[houseCount];
+        for (int h = 0; h < houseCount; h++) order[h] = h;
+        Arrays.sort(order, Comparator.comparingInt(h -> front[h]));
+        int[] group = new int[houseCount];
+        for (int h : order) {
+            if (quota <= 0) break;
+            group[h] = Math.min(quota, free[h]);
+            quota -= group[h];
+        }
+        return group;
+    }
+
+    static Plan evaluate(Triangle t, int[] units) {
         Plan plan = new Plan();
         plan.triangle = t;
-        int[] supply = free.clone();
+        int[] supply = units.clone();
         int used = 0;
         for (int c : t.corners) {
             if (opp[c] + 1 > MAX_UNITS_PER_CORNER) return null;
@@ -491,26 +553,42 @@ class Player {
         return best;
     }
 
-    // 5. idle units gather towards the closest corner still lacking units, or chase opponent units
+    /**
+     * 5. idle units gather towards the closest corner still lacking units, or chase opponent units.
+     * The rear group goes back to the triangles near our start, the others push to the center and beyond.
+     */
     static void moveIdleUnits() {
         for (int s = 0; s < houseCount; s++) {
-            if (free[s] <= 0) continue;
-            int target = -1;
-            for (Triangle t : remainingTargets) {
-                for (int c : t.corners) {
-                    if (c == s || dist[s][c] >= INF || opp[c] + 1 - destined[c] <= free[c]) continue;
-                    if (noEntry[nextHop(s, c)]) continue;
-                    if (target < 0 || dist[s][c] < dist[s][target]) target = c;
-                }
+            int rearIdle = rearLeft == null ? 0 : Math.min(rearLeft[s], free[s]);
+            if (rearIdle > 0) {
+                int target = closestCorner(s, 1);
+                if (target >= 0) assign(s, target, rearIdle, false);
             }
+            if (free[s] <= 0) continue;
+            int target = closestCorner(s, -1);
             if (target < 0) {
                 for (int h = 0; h < houseCount; h++) {
                     if (opp[h] == 0 || h == s || dist[s][h] >= INF || noEntry[nextHop(s, h)]) continue;
                     if (target < 0 || dist[s][h] < dist[s][target]) target = h;
                 }
             }
+            if (target < 0) target = closestCorner(s, 0);
             if (target >= 0) assign(s, target, free[s], false);
         }
+    }
+
+    // closest corner lacking units among the remaining targets: rear = 1 near our start only, -1 elsewhere only, 0 all
+    static int closestCorner(int s, int rear) {
+        int target = -1;
+        for (Triangle t : remainingTargets) {
+            if (rear != 0 && isRear(t) != (rear > 0)) continue;
+            for (int c : t.corners) {
+                if (c == s || dist[s][c] >= INF || opp[c] + 1 - destined[c] <= free[c]) continue;
+                if (noEntry[nextHop(s, c)]) continue;
+                if (target < 0 || dist[s][c] < dist[s][target]) target = c;
+            }
+        }
+        return target;
     }
 
     // 6. cancel moves into houses where the opponent could surround our units next turn
@@ -617,6 +695,8 @@ class Player {
         int[] goal = new int[houseCount];
         Arrays.fill(goal, INF);
         for (Triangle t : remainingTargets) {
+            // the opening spawns units towards the front, not back home
+            if (!invasionDone && isRear(t)) continue;
             for (int c : t.corners) {
                 if (opp[c] + 1 - destined[c] <= 0) continue;
                 for (int h = 0; h < houseCount; h++) goal[h] = Math.min(goal[h], dist[h][c]);
@@ -714,6 +794,47 @@ class Player {
         if (my[h] > opp[h]) return ME;
         if (opp[h] > my[h]) return OPP;
         return NONE;
+    }
+
+    static int[] housesWithUnits(int[] units) {
+        int count = 0;
+        for (int u : units) if (u > 0) count++;
+        int[] houses = new int[count];
+        for (int h = 0, k = 0; h < houseCount; h++) if (units[h] > 0) houses[k++] = h;
+        return houses;
+    }
+
+    // front of each house, and end of the opening once we own enough of the center
+    static void computeZones() {
+        front = new int[houseCount];
+        for (int h = 0; h < houseCount; h++) {
+            int mine = INF, theirs = INF;
+            for (int s : startMine) mine = Math.min(mine, dist[s][h]);
+            for (int s : startTheirs) theirs = Math.min(theirs, dist[s][h]);
+            front[h] = mine >= INF || theirs >= INF ? 0 : mine - theirs;
+        }
+        if (invasionDone) return;
+        int center = 0, owned = 0;
+        for (Triangle t : triangles) {
+            if (!isCenter(t)) continue;
+            center++;
+            if (t.owner == ME) owned++;
+        }
+        invasionDone = turn > INVASION_MAX_TURN || owned >= CENTER_SHARE * center;
+        if (invasionDone) System.err.println("turn " + turn + ": opening over, " + owned + "/" + center + " central triangles owned");
+    }
+
+    // average front of the corners: negative on our side, around zero in the middle of the map
+    static double zone(Triangle t) {
+        return (front[t.corners[0]] + front[t.corners[1]] + front[t.corners[2]]) / 3.0;
+    }
+
+    static boolean isRear(Triangle t) {
+        return zone(t) < -CENTER_WIDTH;
+    }
+
+    static boolean isCenter(Triangle t) {
+        return Math.abs(zone(t)) <= CENTER_WIDTH;
     }
 
     static int total(int[] units) {
