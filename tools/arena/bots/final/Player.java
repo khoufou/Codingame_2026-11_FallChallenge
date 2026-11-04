@@ -10,9 +10,10 @@ import java.math.*;
  * - a used triangle can only be captured again by us once none of our units stands on its corners;
  * - units die when every neighbor house has a strict opponent majority.
  *
- * Each turn: defend owned triangles the opponent could complete, kill opponent stacks that can be
- * surrounded, greedily send free units to the most profitable captures, vacate used triangles so they can
- * be recaptured, keep units out of surround traps, and spend triangles on SPAWN: the bigger army wins.
+ * Each turn: ATTACK big opponent stacks, defend owned triangles the opponent could complete, kill opponent
+ * stacks that can be surrounded, greedily send free units to the most profitable captures, vacate used
+ * triangles so they can be recaptured, keep units out of surround traps, and spend triangles on SPAWN:
+ * the bigger army wins. ATTACK needs league 2 (Wood 1) or above.
  **/
 class Player {
 
@@ -32,6 +33,8 @@ class Player {
     static final int MAX_HALL_TARGETS = 10;
     // stealing a triangle also removes the opponent's income
     static final double OPP_TRIANGLE_VALUE = 2;
+    // an attack costs a triangle and 3 units: only worth it against big stacks
+    static final int ATTACK_MIN_KILLS = 4;
 
     static int houseCount;
     static int[] my, opp;
@@ -51,6 +54,7 @@ class Player {
     static boolean[][] important;   // moves completing a defense, a kill or a capture this turn
     static boolean[] noEntry;       // corners of used triangles being vacated this turn
     static List<Triangle> remainingTargets;
+    static List<String> attacks;
     static List<String> spawns;
     static Set<Triangle> usedTriangles;
 
@@ -167,7 +171,6 @@ class Player {
 
     static String play() {
         int n = houseCount;
-        free = my.clone();
         stay = new int[n];
         arrivals = new int[n];
         destined = new int[n];
@@ -175,9 +178,12 @@ class Player {
         moves = new int[n][n];
         important = new boolean[n][n];
         noEntry = new boolean[n];
+        attacks = new ArrayList<>();
         spawns = new ArrayList<>();
         usedTriangles = new HashSet<>();
 
+        attackStacks();
+        free = my.clone();
         defendTriangles();
         surroundOpponents();
         captureTriangles();
@@ -186,7 +192,7 @@ class Player {
         avoidSurroundTraps();
         growArmy();
 
-        List<String> commands = new ArrayList<>();
+        List<String> commands = new ArrayList<>(attacks);
         for (int s = 0; s < n; s++) {
             for (int d = 0; d < n; d++) {
                 if (moves[s][d] > 0) commands.add("MOVE " + s + " " + d + " " + moves[s][d]);
@@ -196,12 +202,61 @@ class Player {
         return commands.isEmpty() ? "WAIT" : String.join(";", commands);
     }
 
+    /**
+     * 0. attacks are applied before moves: a triangle wipes out the opponent stack on an adjacent house,
+     * at the cost of the triangle and one unit on each of its corners. My and opp are updated accordingly.
+     */
+    static void attackStacks() {
+        if (turnsLeft <= 1) return;
+        while (true) {
+            int target = -1;
+            Triangle source = null;
+            for (int h = 0; h < houseCount; h++) {
+                if (opp[h] < ATTACK_MIN_KILLS || (target >= 0 && opp[h] <= opp[target])) continue;
+                Triangle t = attackSource(h);
+                if (t != null) {
+                    target = h;
+                    source = t;
+                }
+            }
+            if (target < 0) return;
+            StringBuilder sb = new StringBuilder("ATTACK");
+            for (int c : source.corners) {
+                sb.append(' ').append(c);
+                my[c]--;
+            }
+            attacks.add(sb.append(' ').append(target).toString());
+            usedTriangles.add(source);
+            opp[target] = 0;
+        }
+    }
+
+    // owned triangle next to the target with a unit on every corner, keeping the most units on its corners
+    static Triangle attackSource(int target) {
+        Triangle best = null;
+        int bestUnits = -1;
+        for (Triangle t : triangles) {
+            if (t.owner != ME || usedTriangles.contains(t)) continue;
+            boolean adjacent = false;
+            int units = INF;
+            for (int c : t.corners) {
+                units = Math.min(units, my[c]);
+                for (int nb : neighbors[c]) adjacent |= nb == target;
+            }
+            if (adjacent && units >= 1 && units > bestUnits) {
+                best = t;
+                bestUnits = units;
+            }
+        }
+        return best;
+    }
+
     // 1. keep owned triangles out of reach: the opponent must not be able to own all three corners next turn
     static void defendTriangles() {
         int[] planned = planned();
         List<Triangle> threatened = new ArrayList<>();
         for (Triangle t : triangles) {
-            if (t.owner == ME && oppCanTakeAll(t.corners, planned)) threatened.add(t);
+            if (t.owner == ME && !usedTriangles.contains(t) && oppCanTakeAll(t.corners, planned)) threatened.add(t);
         }
         while (true) {
             Triangle bestTriangle = null;

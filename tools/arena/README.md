@@ -7,7 +7,8 @@ Fait jouer deux bots l'un contre l'autre sur des centaines de cartes, sans passe
 | `Arena.java` | Moteur du jeu (portage ligne à ligne du package `engine` du referee officiel, [eulerscheZahl/TryAngle-Catch](https://github.com/eulerscheZahl/TryAngle-Catch), sans le viewer) et lanceur de parties |
 | `Boss.java` | Traduction Java des boss officiels : `boss1` = Wood 2 (`config/level1/Boss.cs`), `boss2` = Wood 1 (`config/level2/Boss.cs`) |
 | `bots/v1/Player.java` | Premier bot, utile comme adversaire faible |
-| `bots/final/Player.java` | Instantané du bot optimisé, pour mesurer tes futures modifications |
+| `bots/wood2/Player.java` | Bot optimisé pour Wood 2 (sans ATTACK) |
+| `bots/final/Player.java` | Instantané du bot actuel (avec ATTACK), pour mesurer tes futures modifications |
 | `build/` | Généré : classes compilées et sorties d'erreur des bots (`build/logs`). Supprimable à tout moment |
 
 ## Lancer des parties
@@ -27,12 +28,14 @@ java tools/arena/Arena.java -a Player.java -b boss2 -l 2 -n 50 -swap
 ```
 
 ```bash
-java tools/arena/Arena.java -a Player.java -b tools/arena/bots/final/Player.java -n 30 -swap
+java tools/arena/Arena.java -a Player.java -b tools/arena/bots/final/Player.java -l 2 -n 30 -swap
 ```
 
 ```bash
-java tools/arena/Arena.java -a Player.java -b boss1 -n 1 -t 1 -trace
+java tools/arena/Arena.java -a Player.java -b boss2 -l 2 -n 1 -t 1 -trace
 ```
+
+Depuis Wood 1, le bot utilise ATTACK : teste-le toujours avec `-l 2`. En ligue 1, le referee ignore les ATTACK et le bot se tromperait dans ses calculs.
 
 | Option | Effet | Défaut |
 |---|---|---|
@@ -67,11 +70,11 @@ End reasons: {B can't score any more points=3, B is dominated=4, B no units or t
 2. Joue-le contre l'instantané avec au moins 30 cartes et `-swap` (60 parties) :
 
    ```bash
-   java tools/arena/Arena.java -a Player.java -b tools/arena/bots/final/Player.java -n 30 -swap
+   java tools/arena/Arena.java -a Player.java -b tools/arena/bots/final/Player.java -l 2 -n 30 -swap
    ```
 
 3. Avec 60 parties, l'écart-type du taux de victoire est d'environ 6 points : un résultat entre 44 % et 56 % ne prouve rien. Augmente `-n` pour trancher.
-4. Si la nouvelle version gagne nettement, copie-la dans `bots/final/` pour qu'elle devienne la nouvelle référence. Vérifie aussi qu'elle bat toujours `boss1` et `boss2`.
+4. Si la nouvelle version gagne nettement, copie-la dans `bots/final/` pour qu'elle devienne la nouvelle référence. Vérifie aussi qu'elle bat toujours `boss2` avec `-l 2`.
 
 ## Limites connues
 
