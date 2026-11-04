@@ -12,8 +12,9 @@ import java.math.*;
  *
  * Each turn: ATTACK big opponent stacks, defend owned triangles the opponent could complete, kill opponent
  * stacks that can be surrounded, greedily send free units to the most profitable captures, vacate used
- * triangles so they can be recaptured, keep units out of surround traps, and spend triangles on SPAWN:
- * the bigger army wins. ATTACK needs league 2 (Wood 1) or above.
+ * triangles so they can be recaptured, and spend triangles on SPAWN: the bigger army wins.
+ * ATTACK needs league 2 (Wood 1) or above.
+ * Units do not avoid houses the opponent could surround: holding them back costs more captures than it saves.
  * Idle units push towards the center and the opponent side; once the opening is over and the army is big
  * enough, a third of it goes back to capture the triangles left near our start.
  **/
@@ -66,7 +67,6 @@ class Player {
     static int[] destined;          // units whose final destination is the house
     static int[] spawned;           // units spawned on the house this turn
     static int[][] moves;           // moves[from][to] = amount
-    static boolean[][] important;   // moves completing a defense, a kill or a capture this turn
     static boolean[] noEntry;       // corners of used triangles being vacated this turn
     static List<Triangle> remainingTargets;
     static List<String> attacks;
@@ -195,7 +195,6 @@ class Player {
         destined = new int[n];
         spawned = new int[n];
         moves = new int[n][n];
-        important = new boolean[n][n];
         noEntry = new boolean[n];
         attacks = new ArrayList<>();
         spawns = new ArrayList<>();
@@ -210,7 +209,6 @@ class Player {
         captureTriangles();
         vacateUsedTriangles();
         moveIdleUnits();
-        avoidSurroundTraps();
         growArmy();
 
         List<String> commands = new ArrayList<>(attacks);
@@ -310,7 +308,7 @@ class Player {
             // units already on the corner stay, the rest steps in from the neighbors with most free units
             int missing = bestAmount;
             int take = Math.min(missing, free[bestCorner]);
-            assign(bestCorner, bestCorner, take, true);
+            assign(bestCorner, bestCorner, take);
             missing -= take;
             while (missing > 0) {
                 int src = -1;
@@ -318,7 +316,7 @@ class Player {
                     if (free[nb] > 0 && (src < 0 || free[nb] > free[src])) src = nb;
                 }
                 take = Math.min(missing, free[src]);
-                assign(src, bestCorner, take, true);
+                assign(src, bestCorner, take);
                 missing -= take;
             }
             planned = planned();
@@ -368,7 +366,7 @@ class Player {
             if (total == 0) continue;
             List<int[]> pulls = supplyDemands(neighbors[h], demand, total);
             if (pulls == null) continue;
-            for (int[] pull : pulls) assign(pull[0], pull[1], pull[2], true);
+            for (int[] pull : pulls) assign(pull[0], pull[1], pull[2]);
         }
     }
 
@@ -477,7 +475,7 @@ class Player {
             }
             if (best == null) break;
             for (int[] pull : best.pulls) {
-                assign(pull[0], pull[1], pull[2], best.eta <= 1);
+                assign(pull[0], pull[1], pull[2]);
                 supply[pull[0]] -= pull[2];
             }
             targets.remove(best.triangle);
@@ -539,7 +537,7 @@ class Player {
             if (!possible) continue;
             for (int c : t.corners) noEntry[c] = true;
             for (int c : t.corners) {
-                if (free[c] > 0) assign(c, exit(c, t, goal), free[c], false);
+                if (free[c] > 0) assign(c, exit(c, t, goal), free[c]);
             }
         }
     }
@@ -562,7 +560,7 @@ class Player {
             int rearIdle = rearLeft == null ? 0 : Math.min(rearLeft[s], free[s]);
             if (rearIdle > 0) {
                 int target = closestCorner(s, 1);
-                if (target >= 0) assign(s, target, rearIdle, false);
+                if (target >= 0) assign(s, target, rearIdle);
             }
             if (free[s] <= 0) continue;
             int target = closestCorner(s, -1);
@@ -573,7 +571,7 @@ class Player {
                 }
             }
             if (target < 0) target = closestCorner(s, 0);
-            if (target >= 0) assign(s, target, free[s], false);
+            if (target >= 0) assign(s, target, free[s]);
         }
     }
 
@@ -591,25 +589,7 @@ class Player {
         return target;
     }
 
-    // 6. cancel moves into houses where the opponent could surround our units next turn
-    static void avoidSurroundTraps() {
-        int[] end = endOfTurn();
-        for (int s = 0; s < houseCount; s++) {
-            for (int d = 0; d < houseCount; d++) {
-                if (moves[s][d] == 0 || important[s][d]) continue;
-                int hop = nextHop(s, d);
-                if (!oppCanTakeAll(neighbors[hop], end)) continue;
-                int amount = moves[s][d];
-                moves[s][d] = 0;
-                arrivals[hop] -= amount;
-                stay[s] += amount;
-                end[hop] -= amount;
-                end[s] += amount;
-            }
-        }
-    }
-
-    // 7. spend owned triangles on new units while units are the bottleneck
+    // 6. spend owned triangles on new units while units are the bottleneck
     static void growArmy() {
         if (turnsLeft <= SPAWN_MIN_TURNS_LEFT) return;
         int outstanding = 0;
@@ -705,7 +685,7 @@ class Player {
         return goal;
     }
 
-    static void assign(int from, int to, int amount, boolean isImportant) {
+    static void assign(int from, int to, int amount) {
         if (amount <= 0) return;
         free[from] -= amount;
         destined[to] += amount;
@@ -714,7 +694,6 @@ class Player {
         } else {
             moves[from][to] += amount;
             arrivals[nextHop(from, to)] += amount;
-            if (isImportant) important[from][to] = true;
         }
     }
 

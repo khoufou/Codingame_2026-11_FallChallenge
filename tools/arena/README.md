@@ -8,8 +8,9 @@ Fait jouer deux bots l'un contre l'autre sur des centaines de cartes, sans passe
 | `Boss.java` | Traduction Java des boss officiels : `boss1` = Wood 2 (`config/level1/Boss.cs`), `boss2` = Wood 1 (`config/level2/Boss.cs`) |
 | `bots/v1/Player.java` | Premier bot, utile comme adversaire faible |
 | `bots/wood2/Player.java` | Bot optimisé pour Wood 2 (sans ATTACK) |
-| `bots/attack/Player.java` | Bot avec ATTACK, avant la stratégie offensive (même force que la version actuelle) |
-| `bots/final/Player.java` | Instantané du bot actuel (ATTACK + poussée vers l'avant + un tiers de l'armée vers l'arrière), pour mesurer tes futures modifications |
+| `bots/attack/Player.java` | Bot avec ATTACK, avant la stratégie offensive (même force que `traps`) |
+| `bots/traps/Player.java` | Bot précédent : comme `final`, mais il annulait les déplacements vers les maisons où l'adversaire pouvait encercler ses unités. Il ne gagne que 24 % des parties contre `final` |
+| `bots/final/Player.java` | Instantané du bot actuel (ATTACK + poussée vers l'avant + un tiers de l'armée vers l'arrière, sans éviter les pièges d'encerclement), pour mesurer tes futures modifications |
 | `build/` | Généré : classes compilées et sorties d'erreur des bots (`build/logs`). Supprimable à tout moment |
 
 ## Lancer des parties
