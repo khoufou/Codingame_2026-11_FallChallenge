@@ -11,7 +11,8 @@ import javax.tools.ToolProvider;
  * viewer code removed. Bots run as external processes speaking the CodinGame protocol.
  *
  * Usage, from the project root: java tools/arena/Arena.java -a BOT -b BOT [options]
- * BOT is a .java file (compiled automatically), boss1 (Wood 2 boss), boss2 (Wood 1 boss) or a full command line.
+ * BOT is a .java file (compiled automatically), boss1 (Wood 2 boss), boss2 (Wood 1 boss), boss3 (Bronze and Silver
+ * boss) or a full command line. Leagues: 1 = Wood 2, 2 = Wood 1 (ATTACK), 3 = Bronze and above (ADD_PATH, REMOVE_PATH).
  * Options: -n games, -s firstSeed, -t threads, -l league, -swap (play each map from both sides), -v (one line per
  * game), -trace (turn by turn log), -build dir (compiled classes and bot error logs, default tools/arena/build),
  * -boss file (boss source, default tools/arena/Boss.java).
@@ -375,6 +376,30 @@ public class Arena {
             return result;
         }
 
+        ArrayList<Edge> edges() {
+            ArrayList<Edge> existingEdges = new ArrayList<>();
+            for (Node n1 : nodes) {
+                for (Node n2 : n1.neighbors) {
+                    if (n2.id > n1.id) existingEdges.add(new Edge(n1, n2));
+                }
+            }
+            return existingEdges;
+        }
+
+        boolean canConnect(Node from, Node to) {
+            return !new Edge(from, to).isBlocked(edges());
+        }
+
+        void connect(Node from, Node to) {
+            from.addNeighbor(to);
+            updateTriangles();
+        }
+
+        void disconnect(Node from, Node to) {
+            from.removeNeighbor(to);
+            updateTriangles();
+        }
+
         static boolean isInside(Node n, Node a, Node b, Node c) {
             if (n == a || n == b || n == c) return false;
             boolean ccw1 = Edge.ccw(n, a, b);
@@ -458,7 +483,7 @@ public class Arena {
             return result;
         }
 
-        String getInput(boolean initial, int p) {
+        String getInput(boolean initial, int p, boolean allowNewEdges) {
             StringBuilder sb = new StringBuilder();
             if (initial) {
                 sb.append(nodes.size()).append('\n');
@@ -471,13 +496,26 @@ public class Arena {
                     links.add(n1.id + " " + n2.id);
                 }
             }
+            // paths that ADD_PATH could create, from league 3 on (the edge list is built once instead of once per pair)
+            ArrayList<String> canLink = new ArrayList<>();
+            if (allowNewEdges) {
+                ArrayList<Edge> existingEdges = edges();
+                for (Node n1 : nodes) {
+                    for (Node n2 : nodes) {
+                        if (n1.id < n2.id && !n1.neighbors.contains(n2) && !new Edge(n1, n2).isBlocked(existingEdges)) {
+                            canLink.add(n1.id + " " + n2.id);
+                        }
+                    }
+                }
+            }
             sb.append(score[p]).append(' ').append(score[1 - p]).append('\n');
             for (Node node : nodes) sb.append(node.id).append(' ').append(node.units[p]).append(' ').append(node.units[1 - p]).append('\n');
             sb.append(links.size()).append('\n');
             for (String link : links) sb.append(link).append('\n');
             sb.append(triangles.size()).append('\n');
             for (Triangle t : triangles) sb.append(t.input(p)).append('\n');
-            sb.append("0\n"); // linkable paths only exist from league 3 on
+            sb.append(canLink.size()).append('\n');
+            for (String link : canLink) sb.append(link).append('\n');
             return sb.toString();
         }
 
@@ -621,6 +659,76 @@ public class Arena {
         }
     }
 
+    static class AddEdgeTask extends Task {
+        Node from, to;
+        Triangle triangle;
+
+        AddEdgeTask(int player, Board board, Matcher m) {
+            super(player);
+            from = board.getNode(m.group("nodeFrom"), this);
+            Node node2 = board.getNode(m.group("node2"), this);
+            Node node3 = board.getNode(m.group("node3"), this);
+            to = board.getNode(m.group("nodeTo"), this);
+            triangle = board.getTriangle(from, node2, node3, this);
+            if (!failedParsing && !board.canConnect(from, to)) failedParsing = true;
+        }
+
+        boolean allowMultiplePerFrame() { return false; }
+
+        int priority() { return 3; }
+
+        int requiredLeague() { return 3; }
+
+        int cost() {
+            return from == null || to == null ? 0 : from.dist2(to);
+        }
+
+        boolean canApply(Board board, boolean strict) {
+            // the referee would crash on an invalid house id here
+            if (from == null || to == null) return false;
+            boolean valid = !failedParsing && triangle.canUse(player, 1) && !from.neighbors.contains(to);
+            if (!strict) valid = true;
+            valid &= board.canConnect(from, to);
+            return valid;
+        }
+
+        void apply(Board board) {
+            triangle.use(1);
+            board.connect(from, to);
+        }
+    }
+
+    static class RemoveEdgeTask extends Task {
+        Node from, to;
+        Triangle triangle;
+
+        RemoveEdgeTask(int player, Board board, Matcher m) {
+            super(player);
+            from = board.getNode(m.group("nodeFrom"), this);
+            Node node2 = board.getNode(m.group("node2"), this);
+            Node node3 = board.getNode(m.group("node3"), this);
+            to = board.getNode(m.group("nodeTo"), this);
+            triangle = board.getTriangle(from, node2, node3, this);
+            if (!failedParsing && !triangle.hasNeighbor(to)) failedParsing = true;
+        }
+
+        boolean allowMultiplePerFrame() { return false; }
+
+        int priority() { return 4; }
+
+        int requiredLeague() { return 3; }
+
+        boolean canApply(Board board, boolean strict) {
+            if (!strict) return true;
+            return !failedParsing && triangle.canUse(player, 1) && from.neighbors.contains(to) && !triangle.hasNode(to);
+        }
+
+        void apply(Board board) {
+            triangle.use(1);
+            board.disconnect(from, to);
+        }
+    }
+
     static class TaskManager {
         final ArrayList<Task> tasks = new ArrayList<>();
 
@@ -635,16 +743,13 @@ public class Arena {
                     if ((m = MOVE.matcher(comm)).matches()) task = new MoveTask(player, board, m);
                     else if ((m = SPAWN.matcher(comm)).matches()) task = new SpawnTask(player, board, m);
                     else if ((m = ATTACK.matcher(comm)).matches()) task = new AttackTask(player, board, m);
-                    else if (ADD_PATH.matcher(comm).matches() || REMOVE_PATH.matcher(comm).matches()) {
-                        if (league < 3) continue;
-                        throw new IllegalStateException("paths are not simulated");
-                    } else {
+                    else if ((m = ADD_PATH.matcher(comm)).matches()) task = new AddEdgeTask(player, board, m);
+                    else if ((m = REMOVE_PATH.matcher(comm)).matches()) task = new RemoveEdgeTask(player, board, m);
+                    else {
                         boolean debug = false;
                         for (Pattern p : DEBUG) debug |= p.matcher(comm).matches();
                         if (debug) continue;
                     }
-                } catch (IllegalStateException ex) {
-                    throw ex;
                 } catch (Exception ex) {
                     return false;
                 }
@@ -794,7 +899,7 @@ public class Arena {
                         }
                         sentAt[p] = System.nanoTime();
                         try {
-                            bots[p].send(board.getInput(turn == 1, p));
+                            bots[p].send(board.getInput(turn == 1, p, league >= 3));
                         } catch (IOException e) {
                             active[p] = false;
                             ended = true;
@@ -843,10 +948,10 @@ public class Arena {
         return result;
     }
 
-    // a .java file is compiled into the build directory, boss1/boss2 run the boss ports, anything else is a command line
+    // a .java file is compiled into the build directory, boss1/boss2/boss3 run the boss ports, anything else is a command line
     static String[] resolveBot(String spec, File build, File bossSource) throws IOException {
         String java = new File(System.getProperty("java.home"), "bin/java").getPath();
-        if (spec.equals("boss1") || spec.equals("boss2")) {
+        if (spec.matches("boss[123]")) {
             File classes = compile(bossSource, new File(build, "boss"));
             return new String[]{java, "-cp", classes.getPath(), "Boss", spec.substring(4)};
         }
