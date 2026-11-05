@@ -48,6 +48,8 @@ class Player {
     // at the opponent start, e^FORWARD times less at ours
     static final double ALL_OUT_RATIO = 1.5;
     static final double FORWARD = 2;
+    // captures are ranked by value per turn of travel: the closest ones first, the units they need count for little
+    static final double UNIT_COST_WEIGHT = 0.1;
 
     static int houseCount;
     static int[] my, opp;
@@ -442,7 +444,7 @@ class Player {
         if (plan.eta >= turnsLeft - 1) return null;
         double value = (t.owner == OPP ? OPP_TRIANGLE_VALUE : 1) * (turnsLeft - 1 - plan.eta);
         if (allOut) value *= Math.exp(FORWARD * zone(t) / startGap);
-        plan.score = value / (1.0 + used * (plan.eta + 1));
+        plan.score = value / (plan.eta + 1) / (1.0 + UNIT_COST_WEIGHT * used);
         return plan;
     }
 

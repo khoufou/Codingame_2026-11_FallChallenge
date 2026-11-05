@@ -11,8 +11,8 @@ Fait jouer deux bots l'un contre l'autre sur des centaines de cartes, sans passe
 | `bots/attack/Player.java` | Bot avec ATTACK, avant la stratégie offensive (même force que `traps`) |
 | `bots/traps/Player.java` | Comme `defense`, mais il annulait les déplacements vers les maisons où l'adversaire pouvait encercler ses unités. Il ne gagne que 24 % des parties contre `defense` |
 | `bots/defense/Player.java` | Bot précédent (ATTACK + poussée vers l'avant + un tiers de l'armée vers l'arrière, sans éviter les pièges d'encerclement) : il défend ses triangles. Même force que `invasion` |
-| `bots/invasion/Player.java` | Version « tout attaque », devenue le bot actuel le 5 novembre 2026 (voir plus bas) |
-| `bots/final/Player.java` | Instantané du bot actuel (aujourd'hui identique à `invasion`), pour mesurer tes futures modifications |
+| `bots/invasion/Player.java` | Version « tout attaque » (voir plus bas), avant le nouveau classement des captures |
+| `bots/final/Player.java` | Instantané du bot actuel (`invasion` + captures les plus proches d'abord), pour mesurer tes futures modifications |
 | `build/` | Généré : classes compilées et sorties d'erreur des bots (`build/logs`). Supprimable à tout moment |
 
 ## Lancer des parties
@@ -95,6 +95,18 @@ java tools/arena/Arena.java -a Player.java -b tools/arena/bots/defense/Player.ja
 ```
 
 Attaquer dès le premier tour perd. Avec ses 3 unités de départ, le bot capture trop peu de triangles pendant que l'adversaire fait grossir son armée : 5 unités contre 25 au tour 13. Mesures contre `traps` (300 parties) : invasion forte dès le début 14 %, tous les ingrédients offensifs combinés 11 %, combats uniquement (aucune capture neutre) 0 %.
+
+## Captures les plus proches d'abord
+
+Le bot choisit ses captures une par une, en commençant par celle qui a le meilleur score. Avant, le score était la valeur du triangle divisée par `1 + unités × (tours de trajet + 1)` : une capture lointaine ou gourmande en unités passait après tout le reste. Le bot actuel divise par `(tours de trajet + 1) × (1 + 0,1 × unités)` : il prend d'abord ce qui est proche, même si cela demande plus d'unités, et il tient ainsi beaucoup plus de triangles.
+
+| Mesure (`-l 3`, 300 parties) | Victoires | Score moyen nous / eux |
+|---|---|---|
+| Contre `invasion`, graines 500 et plus | 65,3 % | 140 / 68 |
+| Contre `invasion`, graines 2000 et plus | 56,7 % | 116 / 80 |
+| Contre `boss3` | 76,7 % (73 % avant) | 74 / 40 |
+
+Autres formules essayées (contre `invasion`, graines 500) : poids des unités 0 / 0,05 / 0,2 / 0,4 = 61 / 66 / 62 / 58 %, trajet au carré 60 %, priorité au coût en unités 40 %. Pistes sans effet ou nuisibles pour tenir plus de triangles : expansion compacte autour de nos triangles (35 à 43 %), captures près des pièges d'encerclement (47 %), 12 unités par coin (50 %), moins d'apparitions (50 %).
 
 ## Essais en Silver
 
