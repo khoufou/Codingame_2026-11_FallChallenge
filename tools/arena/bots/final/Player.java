@@ -3,20 +3,21 @@ import java.io.*;
 import java.math.*;
 
 /**
- * TryAngle Catch bot.
+ * TryAngle Catch bot, all-out attack version ("invasion").
  *
  * Referee facts the strategy relies on:
  * - a captured triangle stays owned until the opponent captures it or it is used, even with empty corners;
  * - a used triangle can only be captured again by us once none of our units stands on its corners;
  * - units die when every neighbor house has a strict opponent majority.
  *
- * Each turn: ATTACK big opponent stacks, defend owned triangles the opponent could complete, kill opponent
- * stacks that can be surrounded, greedily send free units to the most profitable captures, vacate used
- * triangles so they can be recaptured, and spend triangles on SPAWN: the bigger army wins.
- * ATTACK needs league 2 (Wood 1) or above.
- * Units do not avoid houses the opponent could surround: holding them back costs more captures than it saves.
- * Idle units push towards the center and the opponent side; once the opening is over and the army is big
- * enough, a third of it goes back to capture the triangles left near our start.
+ * Each turn: ATTACK big opponent stacks, kill opponent stacks that can be surrounded, greedily send free units
+ * to the most profitable captures, vacate used triangles so they can be recaptured, and spend triangles on SPAWN:
+ * the bigger army wins. ATTACK needs league 2 (Wood 1) or above.
+ * No unit is held back for defense: owned triangles the opponent is about to take become units instead, and units
+ * do not avoid houses the opponent could surround. The army never splits.
+ * The opening grabs the closest triangles to grow the army: rushing the opponent with the starting units loses.
+ * Once our army outnumbers the opponent's by half, the bot goes all out: captures are worth more the closer they
+ * are to the opponent start, and idle units take the houses around opponent stacks to surround them.
  **/
 class Player {
 
@@ -43,9 +44,10 @@ class Player {
     // the opening ends once we own this share of the central triangles, or after this turn
     static final double CENTER_SHARE = 0.5;
     static final int INVASION_MAX_TURN = 40;
-    // after the opening, this share of the army takes the triangles left near our start, once big enough
-    static final double REAR_SHARE = 1.0 / 3;
-    static final int MIN_SPLIT_ARMY = 20;
+    // all out once our army is this many times the opponent's: captures are worth e^FORWARD times more
+    // at the opponent start, e^FORWARD times less at ours
+    static final double ALL_OUT_RATIO = 1.5;
+    static final double FORWARD = 2;
 
     static int houseCount;
     static int[] my, opp;
@@ -57,8 +59,9 @@ class Player {
     static int turnsLeft;
     static int[] startMine, startTheirs; // houses holding units on the first turn
     static int[] front;                  // moves from our start minus moves from the opponent start
+    static int startGap = 1;             // moves between the two starts
     static boolean invasionDone;
-    static int[] rearLeft;               // free units of the rear group, null while the army is not split
+    static boolean allOut;               // our army is big enough to go all out on the opponent
 
     // per-turn plan
     static int[] free;              // units not assigned to any task yet
@@ -199,12 +202,12 @@ class Player {
         attacks = new ArrayList<>();
         spawns = new ArrayList<>();
         usedTriangles = new HashSet<>();
-        rearLeft = null;
         computeZones();
+        allOut = total(my) >= ALL_OUT_RATIO * total(opp);
 
         attackStacks();
         free = my.clone();
-        defendTriangles();
+        spawnThreatened();
         surroundOpponents();
         captureTriangles();
         vacateUsedTriangles();
@@ -270,61 +273,17 @@ class Player {
         return best;
     }
 
-    // 1. keep owned triangles out of reach: the opponent must not be able to own all three corners next turn
-    static void defendTriangles() {
+    /**
+     * 1. owned triangles are not defended: those the opponent could complete next turn, and already contests,
+     * turn into a unit before the opponent takes them.
+     */
+    static void spawnThreatened() {
+        if (turnsLeft <= 1) return;
         int[] planned = planned();
         List<Triangle> threatened = new ArrayList<>();
         for (Triangle t : triangles) {
             if (t.owner == ME && !usedTriangles.contains(t) && oppCanTakeAll(t.corners, planned)) threatened.add(t);
         }
-        while (true) {
-            Triangle bestTriangle = null;
-            int bestCorner = -1;
-            int bestAmount = INF;
-            for (Iterator<Triangle> it = threatened.iterator(); it.hasNext(); ) {
-                Triangle t = it.next();
-                if (!oppCanTakeAll(t.corners, planned)) {
-                    it.remove();
-                    continue;
-                }
-                for (int c : t.corners) {
-                    int available = free[c];
-                    for (int nb : neighbors[c]) available += free[nb];
-                    available = Math.min(available, MAX_UNITS_PER_CORNER);
-                    for (int k = 1; k <= available && k < bestAmount; k++) {
-                        planned[c] += k;
-                        boolean safe = !oppCanTakeAll(t.corners, planned);
-                        planned[c] -= k;
-                        if (safe) {
-                            bestTriangle = t;
-                            bestCorner = c;
-                            bestAmount = k;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (bestTriangle == null) break;
-            // units already on the corner stay, the rest steps in from the neighbors with most free units
-            int missing = bestAmount;
-            int take = Math.min(missing, free[bestCorner]);
-            assign(bestCorner, bestCorner, take);
-            missing -= take;
-            while (missing > 0) {
-                int src = -1;
-                for (int nb : neighbors[bestCorner]) {
-                    if (free[nb] > 0 && (src < 0 || free[nb] > free[src])) src = nb;
-                }
-                take = Math.min(missing, free[src]);
-                assign(src, bestCorner, take);
-                missing -= take;
-            }
-            planned = planned();
-            threatened.remove(bestTriangle);
-        }
-
-        // triangles we cannot hold: turn them into a unit before the opponent takes them
-        if (turnsLeft <= 1) return;
         for (Triangle t : threatened) {
             boolean engaged = false;
             for (int c : t.corners) engaged |= ownerOf(c) == OPP;
@@ -434,42 +393,19 @@ class Player {
         return pulls;
     }
 
-    /**
-     * 3. greedily assign free units to the most profitable capturable triangles.
-     * Once the center is taken and the army is big enough, the third of the army closest to our start captures
-     * the triangles left behind near our start while the rest keeps fighting in the center and beyond.
-     */
+    // 3. greedily assign free units to the most profitable capturable triangles
     static void captureTriangles() {
-        List<Triangle> rearTargets = new ArrayList<>();
-        List<Triangle> otherTargets = new ArrayList<>();
+        remainingTargets = new ArrayList<>();
         for (Triangle t : triangles) {
             if (!t.capturable()) continue;
             boolean trap = false;
             for (int c : t.corners) trap |= surroundedBy(c, opp, my);
-            if (trap) continue;
-            if (isRear(t)) rearTargets.add(t);
-            else otherTargets.add(t);
+            if (!trap) remainingTargets.add(t);
         }
-        if (invasionDone && !rearTargets.isEmpty() && total(my) >= MIN_SPLIT_ARMY) {
-            rearLeft = rearGroup();
-            int[] frontGroup = new int[houseCount];
-            for (int h = 0; h < houseCount; h++) frontGroup[h] = free[h] - rearLeft[h];
-            planCaptures(rearTargets, rearLeft);
-            planCaptures(otherTargets, frontGroup);
-        } else {
-            rearTargets.addAll(otherTargets);
-            otherTargets.clear();
-            planCaptures(rearTargets, free.clone());
-        }
-        remainingTargets = rearTargets;
-        remainingTargets.addAll(otherTargets);
-    }
-
-    // plans captures of the given targets with the given units, removes the planned targets from the list
-    static void planCaptures(List<Triangle> targets, int[] supply) {
-        while (!targets.isEmpty()) {
+        int[] supply = free.clone();
+        while (!remainingTargets.isEmpty()) {
             Plan best = null;
-            for (Triangle t : targets) {
+            for (Triangle t : remainingTargets) {
                 Plan plan = evaluate(t, supply);
                 if (plan != null && (best == null || plan.score > best.score)) best = plan;
             }
@@ -478,23 +414,8 @@ class Player {
                 assign(pull[0], pull[1], pull[2]);
                 supply[pull[0]] -= pull[2];
             }
-            targets.remove(best.triangle);
+            remainingTargets.remove(best.triangle);
         }
-    }
-
-    // the units deepest on our side, a third of the army
-    static int[] rearGroup() {
-        int quota = (int) Math.round(total(my) * REAR_SHARE);
-        Integer[] order = new Integer[houseCount];
-        for (int h = 0; h < houseCount; h++) order[h] = h;
-        Arrays.sort(order, Comparator.comparingInt(h -> front[h]));
-        int[] group = new int[houseCount];
-        for (int h : order) {
-            if (quota <= 0) break;
-            group[h] = Math.min(quota, free[h]);
-            quota -= group[h];
-        }
-        return group;
     }
 
     static Plan evaluate(Triangle t, int[] units) {
@@ -520,6 +441,7 @@ class Player {
         // the capture must be scored at least once before the game ends
         if (plan.eta >= turnsLeft - 1) return null;
         double value = (t.owner == OPP ? OPP_TRIANGLE_VALUE : 1) * (turnsLeft - 1 - plan.eta);
+        if (allOut) value *= Math.exp(FORWARD * zone(t) / startGap);
         plan.score = value / (1.0 + used * (plan.eta + 1));
         return plan;
     }
@@ -552,34 +474,58 @@ class Player {
     }
 
     /**
-     * 5. idle units gather towards the closest corner still lacking units, or chase opponent units.
-     * The rear group goes back to the triangles near our start, the others push to the center and beyond.
+     * 5. when all out, idle units first take the houses around opponent stacks. The others gather towards the closest
+     * corner still lacking units away from our start, chase opponent units, or go back to the triangles near our start.
      */
     static void moveIdleUnits() {
         for (int s = 0; s < houseCount; s++) {
-            int rearIdle = rearLeft == null ? 0 : Math.min(rearLeft[s], free[s]);
-            if (rearIdle > 0) {
-                int target = closestCorner(s, 1);
-                if (target >= 0) assign(s, target, rearIdle);
-            }
+            if (allOut) hunt(s);
             if (free[s] <= 0) continue;
-            int target = closestCorner(s, -1);
+            int target = closestCorner(s, false);
             if (target < 0) {
                 for (int h = 0; h < houseCount; h++) {
                     if (opp[h] == 0 || h == s || dist[s][h] >= INF || noEntry[nextHop(s, h)]) continue;
                     if (target < 0 || dist[s][h] < dist[s][target]) target = h;
                 }
             }
-            if (target < 0) target = closestCorner(s, 0);
+            if (target < 0) target = closestCorner(s, true);
             if (target >= 0) assign(s, target, free[s]);
         }
     }
 
-    // closest corner lacking units among the remaining targets: rear = 1 near our start only, -1 elsewhere only, 0 all
-    static int closestCorner(int s, int rear) {
+    // units on s take the houses next to opponent stacks where we still lack the majority, to surround them later
+    static void hunt(int s) {
+        while (free[s] > 0) {
+            int target = huntTarget(s);
+            if (target < 0) return;
+            assign(s, target, Math.min(free[s], opp[target] + 1 - destined[target]));
+        }
+    }
+
+    // house next to an opponent stack where we still lack the majority: big stacks and short trips first
+    static int huntTarget(int s) {
+        int target = -1;
+        double best = -1;
+        for (int h = 0; h < houseCount; h++) {
+            if (opp[h] == 0 || dist[s][h] >= INF) continue;
+            for (int n : neighbors[h]) {
+                if (opp[n] + 1 - destined[n] <= 0) continue;
+                if (n != s && noEntry[nextHop(s, n)]) continue;
+                double score = opp[h] / (1.0 + dist[s][n]);
+                if (score > best) {
+                    best = score;
+                    target = n;
+                }
+            }
+        }
+        return target;
+    }
+
+    // closest corner lacking units among the remaining targets, those near our start only when includeRear
+    static int closestCorner(int s, boolean includeRear) {
         int target = -1;
         for (Triangle t : remainingTargets) {
-            if (rear != 0 && isRear(t) != (rear > 0)) continue;
+            if (!includeRear && isRear(t)) continue;
             for (int c : t.corners) {
                 if (c == s || dist[s][c] >= INF || opp[c] + 1 - destined[c] <= free[c]) continue;
                 if (noEntry[nextHop(s, c)]) continue;
@@ -791,6 +737,7 @@ class Player {
             for (int s : startMine) mine = Math.min(mine, dist[s][h]);
             for (int s : startTheirs) theirs = Math.min(theirs, dist[s][h]);
             front[h] = mine >= INF || theirs >= INF ? 0 : mine - theirs;
+            if (theirs == 0 && mine < INF) startGap = Math.max(startGap, mine);
         }
         if (invasionDone) return;
         int center = 0, owned = 0;

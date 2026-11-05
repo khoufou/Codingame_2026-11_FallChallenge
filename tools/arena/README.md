@@ -9,9 +9,10 @@ Fait jouer deux bots l'un contre l'autre sur des centaines de cartes, sans passe
 | `bots/v1/Player.java` | Premier bot, utile comme adversaire faible |
 | `bots/wood2/Player.java` | Bot optimisé pour Wood 2 (sans ATTACK) |
 | `bots/attack/Player.java` | Bot avec ATTACK, avant la stratégie offensive (même force que `traps`) |
-| `bots/traps/Player.java` | Bot précédent : comme `final`, mais il annulait les déplacements vers les maisons où l'adversaire pouvait encercler ses unités. Il ne gagne que 24 % des parties contre `final` |
-| `bots/final/Player.java` | Instantané du bot actuel (ATTACK + poussée vers l'avant + un tiers de l'armée vers l'arrière, sans éviter les pièges d'encerclement), pour mesurer tes futures modifications |
-| `bots/invasion/Player.java` | Version « tout attaque » du bot actuel, de même force (voir plus bas) |
+| `bots/traps/Player.java` | Comme `defense`, mais il annulait les déplacements vers les maisons où l'adversaire pouvait encercler ses unités. Il ne gagne que 24 % des parties contre `defense` |
+| `bots/defense/Player.java` | Bot précédent (ATTACK + poussée vers l'avant + un tiers de l'armée vers l'arrière, sans éviter les pièges d'encerclement) : il défend ses triangles. Même force que `invasion` |
+| `bots/invasion/Player.java` | Version « tout attaque », devenue le bot actuel le 5 novembre 2026 (voir plus bas) |
+| `bots/final/Player.java` | Instantané du bot actuel (aujourd'hui identique à `invasion`), pour mesurer tes futures modifications |
 | `build/` | Généré : classes compilées et sorties d'erreur des bots (`build/logs`). Supprimable à tout moment |
 
 ## Lancer des parties
@@ -81,16 +82,16 @@ End reasons: {B can't score any more points=3, B is dominated=4, B no units or t
 
 ## Version « tout attaque »
 
-`bots/invasion/Player.java` est une variante offensive du bot actuel :
+Le bot actuel (`Player.java`, instantané dans `bots/invasion`) est la variante offensive de `defense` :
 
 - aucune unité ne reste en défense : un triangle que l'adversaire va prendre est transformé en unité avant ;
 - l'armée ne se divise jamais (pas de groupe arrière) ;
 - dès que son armée fait 1,5 fois celle de l'adversaire, elle passe à l'attaque totale. Une capture vaut jusqu'à 7 fois plus près du départ adverse, et 7 fois moins près du nôtre. Les unités libres prennent les maisons autour des piles adverses pour les encercler.
 
-Elle a la même force que `final` (52,5 % sur 600 parties) et bat `boss2` à 100 %. Pour la jouer sur CodinGame, colle son contenu à la place de `Player.java`.
+Elle a la même force que `defense` (52,5 % sur 600 parties) et bat `boss2` à 100 %.
 
 ```bash
-java tools/arena/Arena.java -a tools/arena/bots/invasion/Player.java -b Player.java -l 2 -n 150 -swap
+java tools/arena/Arena.java -a Player.java -b tools/arena/bots/defense/Player.java -l 2 -n 150 -swap
 ```
 
 Attaquer dès le premier tour perd. Avec ses 3 unités de départ, le bot capture trop peu de triangles pendant que l'adversaire fait grossir son armée : 5 unités contre 25 au tour 13. Mesures contre `traps` (300 parties) : invasion forte dès le début 14 %, tous les ingrédients offensifs combinés 11 %, combats uniquement (aucune capture neutre) 0 %.
