@@ -109,6 +109,19 @@ Il n'y a pas de règle de « boost » : la seule façon de créer des unités en
 
 Aucune ne fait mieux que le bot actuel : il n'utilise pas ADD_PATH et garde ATTACK à partir de 4 unités.
 
+Contre `boss3` (300 parties en `-l 3`, graines 3000 et plus), le bot actuel gagne 73 %. Le boss attaque chaque tour, dès qu'il a plus de 20 unités, la maison voisine de ses triangles où nous avons le plus d'unités (2 ou plus), et il fait apparaître des unités avec tous ses triangles. Ces essais n'ont rien amélioré :
+
+| Variante | Contre `boss3` | Contre le bot actuel |
+|---|---|---|
+| Plus d'apparitions (6, 12 ou 50 par tour, à chaque tour) | 73 % | non mesuré |
+| Unités libres envoyées une par une au lieu d'en groupe | 73 % | non mesuré |
+| Pas de pile de 2 unités ou plus sur les maisons que le boss peut attaquer | 72 % | non mesuré |
+| ATTACK dès 3, 5 ou 6 unités | 70 / 73 / 73 % | non mesuré |
+| Annuler les déplacements des unités libres vers un piège d'encerclement | 73 % | 45 % |
+| Annuler tous les déplacements vers un piège d'encerclement | 60 % | 6 % |
+
+`traps` bat `boss3` un peu plus souvent (77 %), mais il ne gagne que 24 % contre `defense` et le bot actuel : le bot actuel reste le meilleur compromis.
+
 ## Limites connues
 
 - Le moteur n'a pas été comparé partie par partie au moteur officiel. Il reprend son code source, et sa symétrie est vérifiée : boss contre boss donne 50 %.
