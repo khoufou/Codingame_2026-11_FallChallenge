@@ -106,7 +106,20 @@ Le bot choisit ses captures une par une, en commençant par celle qui a le meill
 | Contre `invasion`, graines 2000 et plus | 56,7 % | 116 / 80 |
 | Contre `boss3` | 76,7 % (73 % avant) | 74 / 40 |
 
-Autres formules essayées (contre `invasion`, graines 500) : poids des unités 0 / 0,05 / 0,2 / 0,4 = 61 / 66 / 62 / 58 %, trajet au carré 60 %, priorité au coût en unités 40 %. Pistes sans effet ou nuisibles pour tenir plus de triangles : expansion compacte autour de nos triangles (35 à 43 %), captures près des pièges d'encerclement (47 %), 12 unités par coin (50 %), moins d'apparitions (50 %).
+Autres formules essayées (contre `invasion`, graines 500) : poids des unités 0 / 0,05 / 0,2 / 0,4 = 61 / 66 / 62 / 58 %, trajet au carré 60 %, priorité au coût en unités 40 %. Essais pour aller encore plus vite, tous neutres contre le bot actuel (300 parties chacun sauf mention) :
+
+| Variante | Victoires |
+|---|---|
+| Triangles adverses valant 1 ou 3 fois plus (au lieu de 2) | 47 / 42 % |
+| 6 ou 12 unités au plus par coin (au lieu de 8) | 51 / 50 % |
+| Attaque totale dès 1,25 ou 2 fois l'armée adverse, ou jamais | 50 / 51 / 51 % |
+| Invasion plus faible ou plus forte (`FORWARD` 1 ou 3) | 50 / 50 % |
+| Arrêter les apparitions 10 ou 30 tours avant la fin (au lieu de 20) | 50 / 50 % |
+| Apparitions à chaque tour, jusqu'à 12 | 50 % |
+| Unités libres vers le coin de la capture la plus rentable plutôt que le plus proche | 50 et 52 % (2 séries), 76 % contre `boss3` |
+| Coin compté comme acquis quand tous ses voisins ont notre majorité (règle des voisins) : plus de triangles tenus, pas plus de victoires | 51 % sur 1 200 parties, 75 % contre `boss3` |
+
+Pistes sans effet ou nuisibles pour tenir plus de triangles : expansion compacte autour de nos triangles (35 à 43 %), captures près des pièges d'encerclement (47 %), 12 unités par coin (50 %), moins d'apparitions (50 %).
 
 ## Essais en Silver
 
