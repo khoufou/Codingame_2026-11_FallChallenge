@@ -132,6 +132,8 @@ Contre `boss3` (300 parties en `-l 3`, graines 3000 et plus), le bot actuel gagn
 | Annuler les déplacements des unités libres vers un piège d'encerclement | 73 % | 45 % |
 | Annuler tous les déplacements vers un piège d'encerclement | 60 % | 6 % |
 
+Bot qui s'adapte à l'adversaire : chaque tour, il repère les maisons vidées depuis le tour précédent. Si un triangle adverse voisin vient d'être utilisé, c'est une ATTACK, et le bot évite ensuite les piles de cette taille près des triangles armés de l'adversaire. Sinon, c'est un encerclement, et ses unités libres évitent ensuite les pièges d'encerclement. La détection fonctionne (le boss est bien reconnu comme attaquant), mais la réponse n'apporte rien : 77 % contre `boss3` et 46 à 49 % contre le bot actuel, avec le nouveau classement des captures (référence : 76,7 % et 50 %).
+
 `traps` bat `boss3` un peu plus souvent (77 %), mais il ne gagne que 24 % contre `defense` et le bot actuel : le bot actuel reste le meilleur compromis.
 
 ## Limites connues
