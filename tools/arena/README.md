@@ -6,13 +6,15 @@ Fait jouer deux bots l'un contre l'autre sur des centaines de cartes, sans passe
 |---|---|
 | `Arena.java` | Moteur du jeu (portage ligne à ligne du package `engine` du referee officiel, [eulerscheZahl/TryAngle-Catch](https://github.com/eulerscheZahl/TryAngle-Catch), sans le viewer) et lanceur de parties |
 | `Boss.java` | Traduction Java des boss officiels : `boss1` = Wood 2 (`config/level1/Boss.cs`), `boss2` = Wood 1 (`config/level2/Boss.cs`), `boss3` = Bronze et Silver (`config/level3/Boss.cs`, identique à `config/Boss.cs`) |
+| `SimTest.java` | Vérifie que la simulation interne de `Player.java` reproduit le moteur de l'arène (voir « Simulation à quelques tours ») |
 | `bots/v1/Player.java` | Premier bot, utile comme adversaire faible |
 | `bots/wood2/Player.java` | Bot optimisé pour Wood 2 (sans ATTACK) |
 | `bots/attack/Player.java` | Bot avec ATTACK, avant la stratégie offensive (même force que `traps`) |
 | `bots/traps/Player.java` | Comme `defense`, mais il annulait les déplacements vers les maisons où l'adversaire pouvait encercler ses unités. Il ne gagne que 24 % des parties contre `defense` |
 | `bots/defense/Player.java` | Bot précédent (ATTACK + poussée vers l'avant + un tiers de l'armée vers l'arrière, sans éviter les pièges d'encerclement) : il défend ses triangles. Même force que `invasion` |
 | `bots/invasion/Player.java` | Version « tout attaque » (voir plus bas), avant le nouveau classement des captures |
-| `bots/final/Player.java` | Instantané du bot actuel (`invasion` + captures les plus proches d'abord), pour mesurer tes futures modifications |
+| `bots/heuristic/Player.java` | Bot précédent (`invasion` + captures les plus proches d'abord), sans simulation : l'adversaire de référence des mesures de la dernière section |
+| `bots/final/Player.java` | Instantané du bot actuel (`heuristic` + simulation à quelques tours), pour mesurer tes futures modifications |
 | `build/` | Généré : classes compilées et sorties d'erreur des bots (`build/logs`). Supprimable à tout moment |
 
 ## Lancer des parties
@@ -82,7 +84,7 @@ End reasons: {B can't score any more points=3, B is dominated=4, B no units or t
 
 ## Version « tout attaque »
 
-Le bot actuel (`Player.java`, instantané dans `bots/invasion`) est la variante offensive de `defense` :
+La version « tout attaque » (instantané dans `bots/invasion`, dont `heuristic` et le bot actuel descendent) est la variante offensive de `defense` :
 
 - aucune unité ne reste en défense : un triangle que l'adversaire va prendre est transformé en unité avant ;
 - l'armée ne se divise jamais (pas de groupe arrière) ;
@@ -98,7 +100,7 @@ Attaquer dès le premier tour perd. Avec ses 3 unités de départ, le bot captur
 
 ## Captures les plus proches d'abord
 
-Le bot choisit ses captures une par une, en commençant par celle qui a le meilleur score. Avant, le score était la valeur du triangle divisée par `1 + unités × (tours de trajet + 1)` : une capture lointaine ou gourmande en unités passait après tout le reste. Le bot actuel divise par `(tours de trajet + 1) × (1 + 0,1 × unités)` : il prend d'abord ce qui est proche, même si cela demande plus d'unités, et il tient ainsi beaucoup plus de triangles.
+Le bot choisit ses captures une par une, en commençant par celle qui a le meilleur score. Avant, le score était la valeur du triangle divisée par `1 + unités × (tours de trajet + 1)` : une capture lointaine ou gourmande en unités passait après tout le reste. Depuis `heuristic`, le bot divise par `(tours de trajet + 1) × (1 + 0,1 × unités)` : il prend d'abord ce qui est proche, même si cela demande plus d'unités, et il tient ainsi beaucoup plus de triangles.
 
 | Mesure (`-l 3`, 300 parties) | Victoires | Score moyen nous / eux |
 |---|---|---|
@@ -147,10 +149,53 @@ Contre `boss3` (300 parties en `-l 3`, graines 3000 et plus), le bot actuel gagn
 
 Bot qui s'adapte à l'adversaire : chaque tour, il repère les maisons vidées depuis le tour précédent. Si un triangle adverse voisin vient d'être utilisé, c'est une ATTACK, et le bot évite ensuite les piles de cette taille près des triangles armés de l'adversaire. Sinon, c'est un encerclement, et ses unités libres évitent ensuite les pièges d'encerclement. La détection fonctionne (le boss est bien reconnu comme attaquant), mais la réponse n'apporte rien : 77 % contre `boss3` et 46 à 49 % contre le bot actuel, avec le nouveau classement des captures (référence : 76,7 % et 50 %).
 
-`traps` bat `boss3` un peu plus souvent (77 %), mais il ne gagne que 24 % contre `defense` et le bot actuel : le bot actuel reste le meilleur compromis.
+`traps` bat `boss3` un peu plus souvent (77 %), mais il ne gagne que 24 % contre `defense` et `heuristic` : `heuristic` restait le meilleur compromis avant la simulation.
+
+## Simulation à quelques tours
+
+Le bot actuel (`Player.java`, instantané dans `bots/final`) garde l'heuristique de `heuristic`, mais il ne joue plus son plan tel quel : il en calcule plusieurs variantes, joue chacune pendant 2 tours dans une copie locale de la partie (l'adversaire aussi), et envoie celle dont l'issue est la meilleure.
+
+- **Simulateur interne** : portage des règles de l'arbitre dans `Player.java` (ATTACK, puis MOVE, puis SPAWN, morts par encerclement, captures, drapeaux de recapture, score). ADD_PATH et REMOVE_PATH ne sont pas simulés. `SimTest.java` rejoue chaque tour dans les deux moteurs et compare unités, propriétaires, drapeaux et scores : 8 300 tours sur 180 cartes, dont 4 200 jeux de commandes aléatoires (attaques invalides, déplacements trop grands, doubles SPAWN), 0 écart.
+- **Adversaire** : il est supposé jouer notre heuristique de base. `-Dmodels=base,boss` ajoute un modèle de type boss (ATTACK dès 2 unités, SPAWN avec tous ses triangles, pas d'encerclement) et garde la pire des deux issues.
+- **Variantes** (10, plus le plan de base) : chacune change un réglage de l'heuristique : ATTACK dès 2 unités ou jamais, ignorer la meilleure ou les deux meilleures captures, pas de SPAWN des triangles menacés, triangles adverses valant 1 ou 4, coût des unités fort, 12 unités par coin, pas de chasse ni de poussée vers l'avant. Les variantes de SPAWN (aucun, tous) et d'encerclement (aucun) existent mais sont exclues par défaut : retarder un SPAWN paraît toujours bon à horizon court, et l'issue d'un encerclement dépend de là où l'adversaire bouge.
+- **Issue d'une simulation** : points marqués pendant les 2 tours + (triangles tenus − triangles adverses) × 15 + (unités − unités adverses) × 4 + captures en cours des deux camps (valeur × 0,8^(trajet + 1)) ; un triangle utilisé dont on occupe encore les coins compte comme une capture à 2 tours.
+- **Temps** : les variantes sont essayées tant que le tour a moins de 30 ms, le plan de base toujours en premier ; le premier tour chauffe la JVM pendant 300 ms. Sur cette machine, à vide : 3 ms par tour en moyenne, 14 ms au maximum.
+
+Les options `-Dlookahead=0` (plan de base seul, identique à `heuristic`), `-Dflavours=...`, `-Dmodels=...`, `-Ddiscount=...`, `-DunitValue=...`, `-Dhorizon=...` et `-Dbudget=...` servent aux expériences. Pour les passer au bot dans l'arène, compile-le et donne la ligne de commande complète :
+
+```bash
+javac -d tools/arena/build/sim Player.java && java tools/arena/Arena.java -a "java -Ddiscount=0.9 -cp tools/arena/build/sim Player" -b boss3 -l 3 -n 150 -swap
+```
+
+Vérification de la simulation interne :
+
+```bash
+javac -d tools/arena/build/simtest Player.java tools/arena/Arena.java tools/arena/SimTest.java && java -cp tools/arena/build/simtest SimTest 50 1
+```
+
+| Mesure (`-l 3`, 300 parties) | Victoires | Score moyen nous / eux |
+|---|---|---|
+| Contre `heuristic`, graines 500 et plus | 96,7 % | 113 / 36 |
+| Contre `heuristic`, graines 2000 et plus | 95,7 % | 120 / 13 |
+| Contre `boss3`, graines 3000 et plus | 84,7 % (`heuristic` : 76,7 %) | 93 / 42 |
+| Contre `boss3`, graines 4000 et plus | 80,3 % (`heuristic` : 73,7 %) | 88 / 40 |
+
+Contre `heuristic`, le modèle d'adversaire est exact (c'est le même code) : la simulation voit ses coups à l'avance. Le gain contre `boss3`, qui joue autrement, mesure ce qui reste quand le modèle se trompe. Réglages essayés contre `boss3` (graines 3000, 300 parties chacun) :
+
+| Variante | Contre `boss3` | Contre `heuristic` |
+|---|---|---|
+| Toutes les variantes, dont SPAWN et encerclement | 58 à 65 % | 96 à 97 % |
+| Deux modèles d'adversaire (base + boss, pire issue), 8 variantes dont « aucun encerclement » | 78 % | 86 % |
+| Variantes retenues, décote 0,6 des captures en cours (au lieu de 0,8) | 78 % | 88 % |
+| Décote 0,9 | 85 % | non mesuré |
+| Horizon de 3 tours au lieu de 2 | 74 % | non mesuré |
+| Unités valant 2 / 6 points au lieu de 4 | 72 / 78 % | non mesuré |
+| Revenu des triangles compté sur 25 tours au lieu de 15 | 84 % | non mesuré |
 
 ## Limites connues
 
 - Le moteur n'a pas été comparé partie par partie au moteur officiel. Il reprend son code source, et sa symétrie est vérifiée : boss contre boss donne 50 %.
 - `ATTACK` est simulé avec `-l 2`, `ADD_PATH` et `REMOVE_PATH` avec `-l 3`. Les résultats en `-l 2` sont identiques avant et après l'ajout des chemins.
 - Les boss ont la même logique que les originaux, mais leurs tirages aléatoires diffèrent (générateur Java au lieu de C#).
+- La simulation interne du bot ignore ADD_PATH et REMOVE_PATH, que `boss3` utilise, et ne connaît l'adversaire qu'à travers un modèle.
+- Les temps par tour affichés par l'arène (`A timing`) incluent le lancement de la JVM au premier tour et la charge de la machine : avec 12 parties en parallèle, ils dépassent largement ceux que le bot mesure lui-même (ligne `turn N: ...` dans `build/logs`).
